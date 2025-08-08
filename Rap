@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ELKS SWEEP — Futuristic Minesweeper</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&display=swap');
+  :root{--cell:32px;--gap:4px}
+  body{
+    font-family:'Orbitron',system-ui;
+    display:flex;align-items:center;justify-content:center;
+    min-height:100vh;margin:0;
+    background:radial-gradient(circle at top,#0a0f1f 0%,#000 80%);
+    color:#00f0ff;
+  }
+  .container{max-width:980px;width:100%;padding:18px;text-align:center}
+  header{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:center;margin-bottom:12px}
+  h1{
+    font-size:28px;margin:0;
+    background:linear-gradient(90deg,#00f0ff,#ff00e0);
+    -webkit-background-clip:text;
+    -webkit-text-fill-color:transparent;
+    text-shadow:0 0 8px rgba(0,240,255,0.7);
+  }
+  .controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:center}
+  select,input[type=number]{
+    padding:6px;border-radius:6px;
+    border:1px solid rgba(0,240,255,0.3);
+    background:rgba(0,240,255,0.05);color:#00f0ff;
+    font-family:inherit;
+  }
+  button{
+    padding:8px 10px;border-radius:8px;border:none;
+    background:linear-gradient(90deg,#00f0ff,#ff00e0);
+    color:#fff;cursor:pointer;font-family:inherit;
+    font-weight:700;letter-spacing:1px;text-shadow:0 0 4px #000;
+  }
+  button.secondary{background:rgba(255,255,255,0.1)}
+  #board{
+    display:grid;gap:var(--gap);
+    background:rgba(0,240,255,0.08);
+    padding:12px;border-radius:10px;
+    box-shadow:0 0 15px rgba(0,240,255,0.4);
+  }
+  .cell{
+    width:var(--cell);height:var(--cell);
+    display:grid;place-items:center;
+    background:rgba(0,0,0,0.6);
+    border:1px solid rgba(0,240,255,0.3);
+    border-radius:4px;
+    user-select:none;cursor:pointer;font-weight:700;
+    font-size:14px;color:#00f0ff;
+    transition:background 0.15s,transform 0.1s;
+  }
+  .cell:hover{background:rgba(0,240,255,0.15);transform:scale(1.05)}
+  .cell.revealed{background:rgba(0,240,255,0.2);color:#fff;cursor:default}
+  .cell.flagged{background:rgba(255,0,128,0.25)}
+  .cell.mine{background:rgba(255,0,0,0.5);color:#fff}
+  .status{margin-left:12px;font-weight:600;color:#ff00e0;text-shadow:0 0 6px rgba(255,0,224,0.7)}
+  .stats{
+    display:flex;gap:12px;align-items:center;justify-content:center;
+    font-size:14px;color:#ff00e0;text-shadow:0 0 4px rgba(255,0,224,0.5);
+    margin-top:8px;
+  }
+  .legend{margin-top:8px;font-size:12px;color:#00f0ff}
+  footer{margin-top:14px;color:#888;font-size:13px}
+  @media (max-width:520px){:root{--cell:28px} header{flex-direction:column}}
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>ELKS SWEEP</h1>
+  </header>
+  <div class="controls">
+    <label>Rows <input id="rows" type="number" min="5" max="30" value="9" style="width:64px"></label>
+    <label>Cols <input id="cols" type="number" min="5" max="30" value="9" style="width:64px"></label>
+    <label>Mines <input id="mines" type="number" min="1" value="10" style="width:80px"></label>
+    <button id="new">New Game</button>
+    <button id="reset" class="secondary">Reset</button>
+    <div class="status" id="status">Ready</div>
+  </div>
+  <div class="stats">
+    <div>⏱ Time: <span id="timer">0</span>s</div>
+    <div>🏆 Wins: <span id="wins">0</span></div>
+    <div>💀 Losses: <span id="losses">0</span></div>
+  </div>
+  <div id="board" aria-label="Minesweeper board"></div>
+  <div class="legend">
+    Left-click to reveal • Right-click to flag • Double-click to quick-clear
+  </div>
+  <footer>Brand: ELKS SWEEP — Futuristic Minesweeper</footer>
+</div>
+<script>
+(() => {
+  const boardEl = document.getElementById('board');
+  const rowsInput = document.getElementById('rows');
+  const colsInput = document.getElementById('cols');
+  const minesInput = document.getElementById('mines');
+  const newBtn = document.getElementById('new');
+  const resetBtn = document.getElementById('reset');
+  const statusEl = document.getElementById('status');
+  const timerEl = document.getElementById('timer');
+  const winsEl = document.getElementById('wins');
+  const lossesEl = document.getElementById('losses');
+
+  let rows=9, cols=9, mines=10;
+  let grid = [];
+  let firstClick = true;
+  let gameOver = false;
+  let flagsLeft = 0;
+  let timer = 0, timerInterval = null;
+  let wins = 0, losses = 0;
+
+  function clampMines(){
+    const max = Math.max(1, Math.floor(rows*cols*0.6));
+    mines = Math.min(Math.max(1, mines), max);
+    minesInput.value = mines;
+  }
+
+  function buildBoard(){
+    stopTimer();
+    timer = 0;
+    timerEl.textContent = 0;
+    boardEl.innerHTML='';
+    boardEl.style.gridTemplateColumns = `repeat(${cols}, var(--cell))`;
+    grid = Array.from({length:rows}, ()=>Array.from({length:cols}, ()=>({revealed:false,mine:false,flag:false,count:0,el:null})));
+    for(let r=0;r<rows;r++){
+      for(let c=0;c<cols;c++){
+        const cell = document.createElement('div');
+        cell.className='cell';
+        cell.dataset.r=r; cell.dataset.c=c;
+        attachCellEvents(cell);
+        grid[r][c].el = cell;
+        boardEl.appendChild(cell);
+      }
+    }
+    flagsLeft = mines;
+    updateStatus('Ready');
+    firstClick = true;
+    gameOver = false;
+  }
+
+  function startTimer(){
+    stopTimer();
+    timerInterval = setInterval(()=>{
+      timer++;
+      timerEl.textContent = timer;
+    },1000);
+  }
+
+  function stopTimer(){
+    clearInterval(timerInterval);
+  }
+
+  function placeMines(avoidR, avoidC){
+    let placed = 0;
+    while(placed < mines){
+      const r = Math.floor(Math.random()*rows);
+      const c = Math.floor(Math.random()*cols);
+      if(grid[r][c].mine) continue;
+      if(Math.abs(r-avoidR)<=1 && Math.abs(c-avoidC)<=1) continue;
+      grid[r][c].mine = true; placed++;
+    }
+    for(let r=0;r<rows;r++){
+      for(let c=0;c<cols;c++){
+        if(grid[r][c].mine) continue;
+        let count = 0;
+        for(let dr=-1;dr<=1;dr++) for(let dc=-1;dc<=1;dc++){
+          const nr=r+dr, nc=c+dc;
+          if(nr>=0 && nr<rows && nc>=0 && nc<cols && grid[nr][nc].mine) count++;
+        }
+        grid[r][c].count = count;
+      }
+    }
+  }
+
+  function reveal(r,c){
+    if(gameOver) return;
+    const cell = grid[r][c];
+    if(cell.revealed || cell.flag) return;
+    cell.revealed = true;
+    const el = cell.el;
+    el.classList.add('revealed');
+    if(cell.mine){
+      el.classList.add('mine');
+      el.textContent = '💣';
+      endGame(false);
+      return;
+    }
+    el.textContent = cell.count ? cell.count : '';
+    if(cell.count===0){
+      for(let dr=-1;dr<=1;dr++) for(let dc=-1;dc<=1;dc++){
+        const nr=r+dr, nc=c+dc;
+        if(nr>=0 && nr<rows && nc>=0 && nc<cols) reveal(nr,nc);
+      }
+    }
+    checkWin();
+  }
+
+  function toggleFlag(r,c){
+    if(gameOver) return;
+    const cell = grid[r][c];
+    if(cell.revealed) return;
+    cell.flag = !cell.flag;
+    const el = cell.el;
+    if(cell.flag){
+      el.textContent = '🚩';
+      el.classList.add('flagged');
+      flagsLeft--;
+    } else {
+      el.textContent = '';
+      el.classList.remove('flagged');
+      flagsLeft++;
+    }
+    updateStatus();
+  }
+
+  function quickClear(r,c){
+    const cell = grid[r][c];
+    if(!cell.revealed || cell.count===0) return;
+    let flagged=0;
+    for(let dr=-1;dr<=1;dr++) for(let dc=-1;dc<=1;dc++){
+      const nr=r+dr, nc=c+dc;
+      if(nr>=0 && nr<rows && nc>=0 && nc<cols && grid[nr][nc].flag) flagged++;
+    }
+    if(flagged === cell.count){
+      for(let dr=-1;dr<=1;dr++) for(let dc=-1;dc<=1;dc++){
+        const nr=r+dr, nc=c+dc;
+        if(nr>=0 && nr<rows && nc>=0 && nc<cols && !grid[nr][nc].flag) reveal(nr,nc);
+      }
+    }
+  }
+
+  function endGame(won){
+    gameOver = true;
+    stopTimer();
+    if(!won){
+      losses++;
+      lossesEl.textContent = losses;
+      for(let r=0;r<rows;r++) for(let c=0;c<cols;c++){
+        if(grid[r][c].mine){
+          grid[r][c].el.classList.add('revealed','mine');
+          grid[r][c].el.textContent = '💣';
+        }
+      }
+      updateStatus('Boom — You lost 💥');
+    } else {
+      wins++;
+      winsEl.textContent = wins;
+      updateStatus('Victory — You won 🎉');
+    }
+  }
+
+  function checkWin(){
+    let unrevealed = 0;
+    for(let r=0;r<rows;r++) for(let c=0;c<cols;c++){
+      if(!grid[r][c].revealed) unrevealed++;
+    }
+    if(unrevealed === mines){
+      endGame(true);
+    } else {
+      updateStatus();
+    }
+  }
+
+  function attachCellEvents(el){
+    const r = parseInt(el.dataset.r), c = parseInt(el.dataset.c);
+    el.addEventListener('contextmenu', (ev) => { ev.preventDefault(); toggleFlag(r,c); });
+    el.addEventListener('click', () => {
+      if(gameOver) return;
+      if(firstClick){
+        placeMines(r,c);
+        startTimer();
+        firstClick=false;
+      }
+      reveal(r,c);
+    });
+    el.addEventListener('dblclick', () => {
+      if(gameOver) return;
+      quickClear(r,c);
+    });
+  }
+
+  function updateStatus(msg){
+    if(msg){
+      statusEl.textContent = msg;
+      return;
+    }
+    statusEl.textContent = `Mines: ${mines} • Flags left: ${flagsLeft}`;
+  }
+
+  newBtn.addEventListener('click', ()=>{
+    rows = parseInt(rowsInput.value) || 9;
+    cols = parseInt(colsInput.value) || 9;
+    mines = parseInt(minesInput.value) || 10;
+    clampMines();
+    buildBoard();
+  });
+  resetBtn.addEventListener('click', ()=>{ buildBoard(); });
+
+  buildBoard();
+})();
+</script>
+</body>
+</html>
